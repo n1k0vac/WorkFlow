@@ -346,9 +346,25 @@ useEffect(() => {
         }
       };
 
-     const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
-      });
+    // 1. ĐỔI ĐƯỜNG DẪN v1 THÀNH v1beta Ở ĐÂY
+const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+  method: "POST", 
+  headers: { "Content-Type": "application/json" }, 
+  body: JSON.stringify(payload)
+});
+      
+const data = await res.json();
+
+// 2. THÊM ĐOẠN BẮT LỖI CHI TIẾT NÀY VÀO
+if (!res.ok) {
+  console.error("Lỗi chi tiết từ Google:", data);
+  // Bắn alert ra màn hình cho dễ đọc
+  alert(`Bị Google từ chối rồi:\n${data.error?.message || 'Lỗi không xác định'}`);
+  setIsGeneratingAI(false);
+  return;
+}
+
+// ... đoạn code xử lý kết quả bên dưới giữ nguyên
       
       const data = await res.json();
       if(data.candidates?.[0]?.content?.parts?.[0]?.text) {
