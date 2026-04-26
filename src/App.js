@@ -156,22 +156,21 @@ const App = () => {
   const [addToFocus, setAddToFocus] = useState(true);
 
   // 1. Xử lý Authentication
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
+useEffect(() => {
+  const initAuth = async () => {
+    try {
+      // Chỉ cần dòng này là đủ để Firebase cho phép bạn đọc/ghi dữ liệu ẩn danh
+      await signInAnonymously(auth);
+    } catch (error) {
+      console.error("Auth error:", error);
+    }
+  };
+  initAuth();
+  
+  // Lắng nghe trạng thái đăng nhập để set User vào State
+  const unsubscribe = onAuthStateChanged(auth, setUser);
+  return () => unsubscribe();
+}, []);
 
   // 2. Lắng nghe dữ liệu (Tasks, Settings, Events)
   useEffect(() => {
