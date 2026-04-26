@@ -148,7 +148,50 @@ const App = () => {
   const [newEvent, setNewEvent] = useState({ title: '', startTime: '09:00', endTime: '10:00' });
   const [addToFocus, setAddToFocus] = useState(true);
 
-  // --- TÍCH HỢP XIN QUYỀN THÔNG BÁO (Web Notifications) ---
+  // --- STATES CHO PWA INSTALL BANNER ---
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [showIosInstall, setShowIosInstall] = useState(false);
+
+  // --- LOGIC NHẬN DIỆN VÀ MỜI CÀI ĐẶT PWA ---
+  useEffect(() => {
+    // 1. Dành cho Android / Chrome PC
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault(); // Ngăn trình duyệt tự bật thông báo mặc định
+      setDeferredPrompt(e);
+      setShowInstallBanner(true); // Bật banner mời cài đặt của mình
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // 2. Dành riêng cho iPhone (iOS Safari)
+    const isIos = () => {
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      return /iphone|ipad|ipod/.test(userAgent);
+    };
+    // Kiểm tra xem đã cài ra Home Screen chưa
+    const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
+
+    // Nếu là iOS và chưa cài đặt, hiện hướng dẫn sau 2 giây
+    if (isIos() && !isInStandaloneMode()) {
+      const timer = setTimeout(() => setShowIosInstall(true), 2000);
+      return () => clearTimeout(timer);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setShowInstallBanner(false);
+      }
+      setDeferredPrompt(null);
+    }
+  };
+
+  // --- TÍCH HỢP XIN QUYỀN THÔNG BÁO ---
   useEffect(() => {
     if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
       Notification.requestPermission();
@@ -214,35 +257,30 @@ const App = () => {
     return () => clearInterval(timerRef.current);
   }, [isActive, timeLeft]);
 
-  // --- CẬP NHẬT HÀM KẾT THÚC ĐẾM GIỜ ĐỂ BẮN THÔNG BÁO ---
   const handleTimerEnd = () => {
     setIsActive(false);
     clearInterval(timerRef.current);
     
     const notifMessage = timerMode === 'work' ? 'Bạn đã làm việc rất tốt! Giờ hãy nghỉ ngơi nhé.' : 'Nghỉ ngơi đủ rồi, quay lại công việc thôi nào!';
 
-    // 1. Phát âm thanh
     if (!isMuted) {
       const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3');
       audio.volume = 0.3; audio.play().catch(() => {});
     }
     
-    // 2. Thoát Compact Mode nếu đang bật
     if (isCompactMode) setIsCompactMode(false);
     
-    // 3. Hiện Modal trên giao diện web
     setNotification({
       show: true,
       message: notifMessage,
       type: timerMode
     });
 
-    // 4. Bắn Web Notification ra ngoài trình duyệt (Hỗ trợ PWA sau này)
     if ("Notification" in window && Notification.permission === "granted") {
       new Notification(timerMode === 'work' ? "Hết giờ Focus! 🍅" : "Hết giờ Break! ☕", {
         body: notifMessage,
-        icon: "/logo192.png", // Icon này sẽ thiết lập ở phần PWA
-        requireInteraction: true // Bắt buộc user phải tắt/click mới biến mất
+        icon: "/logo192.png",
+        requireInteraction: true 
       });
     }
   };
@@ -328,11 +366,12 @@ const App = () => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', eventId));
   }
 
+  // --- BẮT LỖI MIC ĐẶC THÙ CHO IPHONE (iOS) ---
   const handleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Trình duyệt của bạn không hỗ trợ nhận diện giọng nói. Hãy thử dùng Chrome hoặc Edge nhé!");
+      alert("Trình duyệt không hỗ trợ Mic hoặc bạn đang dùng ứng dụng bên thứ 3 (như Zalo/Messenger). Vui lòng mở bằng Safari trên iPhone để dùng tính năng này!");
       return;
     }
 
@@ -349,7 +388,10 @@ const App = () => {
     };
 
     recognition.onerror = (event) => {
-      console.error("Lỗi nhận diện:", event.error);
+      console.error("Lỗi Mic:", event.error);
+      if (event.error === 'not-allowed') {
+        alert("Micro đang bị chặn! Bạn vui lòng cấp quyền truy cập Micro cho Safari/Trình duyệt trong Cài đặt của máy.");
+      }
       setIsListening(false);
     };
 
@@ -478,6 +520,33 @@ const App = () => {
 
   return (
     <div className={settings.theme === 'dark' ? 'dark' : ''}>
+      {/* BANNER MỜI CÀI ĐẶT APP (PWA) CHỈ HIỆN KHI CHƯA CÀI */}
+      {(showInstallBanner || showIosInstall) && (
+        <div className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-3 sm:py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-lg relative z-[150] animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-3 mb-3 sm:mb-0">
+            <div className="bg-white/20 p-2.5 rounded-xl shadow-inner shrink-0"><Layout size={20}/></div>
+            <div className="text-sm">
+              <p className="font-black text-base">Cài đặt FocusFlow App</p>
+              <p className="text-violet-100 text-xs sm:text-sm mt-0.5 opacity-90">
+                {showIosInstall
+                  ? "Nhấn biểu tượng Chia sẻ (Share) ở dưới cùng màn hình -> Chọn 'Thêm vào MH chính'."
+                  : "Cài app ra màn hình chính để dùng mượt mà và nhận thông báo."}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            {!showIosInstall && (
+              <button onClick={handleInstallApp} className="bg-white text-violet-600 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black active:scale-95 transition-transform shadow-md hover:bg-violet-50">
+                Cài đặt ngay
+              </button>
+            )}
+            <button onClick={() => { setShowInstallBanner(false); setShowIosInstall(false); }} className="p-2.5 hover:bg-white/20 rounded-xl transition-colors text-white/80 hover:text-white" title="Đóng">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0F172A] text-slate-900 dark:text-slate-100 p-4 md:p-8 pb-24 md:pb-8 font-sans transition-colors duration-500 relative overflow-x-hidden">
         
         {/* COMPACT MODE OVERLAY (Focus Mode Only) */}
