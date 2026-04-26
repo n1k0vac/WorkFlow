@@ -21,7 +21,7 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'todo-timer-app';
 
 // AI API Key (provided by environment)
-const apiKey = "";
+const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
 
 // --- Custom Time Picker Component ---
 const CustomTimePicker = ({ value, onChange }) => {
