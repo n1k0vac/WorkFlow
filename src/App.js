@@ -141,12 +141,19 @@ const App = () => {
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [isListening, setIsListening] = useState(false); // Thêm state quản lý Voice
+  const [isListening, setIsListening] = useState(false);
   
   const [showInlineForm, setShowInlineForm] = useState(false);
   const [selectedDateStr, setSelectedDateStr] = useState('');
   const [newEvent, setNewEvent] = useState({ title: '', startTime: '09:00', endTime: '10:00' });
   const [addToFocus, setAddToFocus] = useState(true);
+
+  // --- TÍCH HỢP XIN QUYỀN THÔNG BÁO (Web Notifications) ---
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -207,19 +214,37 @@ const App = () => {
     return () => clearInterval(timerRef.current);
   }, [isActive, timeLeft]);
 
+  // --- CẬP NHẬT HÀM KẾT THÚC ĐẾM GIỜ ĐỂ BẮN THÔNG BÁO ---
   const handleTimerEnd = () => {
     setIsActive(false);
     clearInterval(timerRef.current);
+    
+    const notifMessage = timerMode === 'work' ? 'Bạn đã làm việc rất tốt! Giờ hãy nghỉ ngơi nhé.' : 'Nghỉ ngơi đủ rồi, quay lại công việc thôi nào!';
+
+    // 1. Phát âm thanh
     if (!isMuted) {
       const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3');
       audio.volume = 0.3; audio.play().catch(() => {});
     }
+    
+    // 2. Thoát Compact Mode nếu đang bật
     if (isCompactMode) setIsCompactMode(false);
+    
+    // 3. Hiện Modal trên giao diện web
     setNotification({
       show: true,
-      message: timerMode === 'work' ? 'Bạn đã làm việc rất tốt! Giờ hãy nghỉ ngơi nhé.' : 'Nghỉ ngơi đủ rồi, quay lại công việc thôi nào!',
+      message: notifMessage,
       type: timerMode
     });
+
+    // 4. Bắn Web Notification ra ngoài trình duyệt (Hỗ trợ PWA sau này)
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(timerMode === 'work' ? "Hết giờ Focus! 🍅" : "Hết giờ Break! ☕", {
+        body: notifMessage,
+        icon: "/logo192.png", // Icon này sẽ thiết lập ở phần PWA
+        requireInteraction: true // Bắt buộc user phải tắt/click mới biến mất
+      });
+    }
   };
 
   const toggleTimer = () => setIsActive(!isActive);
@@ -303,7 +328,6 @@ const App = () => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', eventId));
   }
 
-  // --- Logic API Web Speech (Voice to Text) ---
   const handleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -313,7 +337,7 @@ const App = () => {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'vi-VN'; // Setup Tiếng Việt
+    recognition.lang = 'vi-VN'; 
     recognition.continuous = false;
     recognition.interimResults = false;
 
@@ -321,7 +345,6 @@ const App = () => {
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
-      // Nối thêm text vừa nói vào ô input thay vì xóa text cũ
       setAiPrompt(prev => prev ? prev + ' ' + transcript : transcript);
     };
 
@@ -335,7 +358,6 @@ const App = () => {
     recognition.start();
   };
 
-  // --- Logic API AI Planner ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
     setIsGeneratingAI(true);
