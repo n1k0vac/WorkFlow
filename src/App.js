@@ -10,17 +10,17 @@ import {
   Plus, Trash2, CheckCircle, Play, Pause, RotateCcw, Clock, 
   CheckSquare, Bell, BellOff, Settings, X, Loader2, PartyPopper, Coffee, 
   Sun, Moon, Layout, Maximize2, Minimize2, Calendar as CalendarIcon, 
-  Sparkles, ChevronLeft, ChevronRight
+  Sparkles, ChevronLeft, ChevronRight, Mic
 } from 'lucide-react';
 
 // --- Khởi tạo Firebase (Đã bảo mật API Key) ---
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, // Yêu cầu thêm vào Vercel Environment Variables
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "workflow-bb753.firebaseapp.com",
   projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "workflow-bb753",
   storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "workflow-bb753.firebasestorage.app",
   messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "608288170073",
-  appId: process.env.REACT_APP_FIREBASE_APP_ID, // Yêu cầu thêm vào Vercel Environment Variables
+  appId: process.env.REACT_APP_FIREBASE_APP_ID, 
   measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-LQDP02Y66S"
 };
 const app = initializeApp(firebaseConfig);
@@ -28,7 +28,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'focus-flow-app';
 
-// AI API Key (Bảo mật qua Environment Variable)
+// AI API Key
 const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
 
 // --- Custom Time Picker Component ---
@@ -141,6 +141,7 @@ const App = () => {
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [isListening, setIsListening] = useState(false); // Thêm state quản lý Voice
   
   const [showInlineForm, setShowInlineForm] = useState(false);
   const [selectedDateStr, setSelectedDateStr] = useState('');
@@ -302,6 +303,38 @@ const App = () => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', eventId));
   }
 
+  // --- Logic API Web Speech (Voice to Text) ---
+  const handleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Trình duyệt của bạn không hỗ trợ nhận diện giọng nói. Hãy thử dùng Chrome hoặc Edge nhé!");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'vi-VN'; // Setup Tiếng Việt
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => setIsListening(true);
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      // Nối thêm text vừa nói vào ô input thay vì xóa text cũ
+      setAiPrompt(prev => prev ? prev + ' ' + transcript : transcript);
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Lỗi nhận diện:", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => setIsListening(false);
+
+    recognition.start();
+  };
+
   // --- Logic API AI Planner ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
@@ -331,17 +364,14 @@ const App = () => {
         }
       };
 
-      // Đã cập nhật lên v1beta
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify(payload)
       });
       
-      // Khai báo data một lần duy nhất
       const data = await res.json();
 
-      // Bắt lỗi 400 Bad Request
       if (!res.ok) {
         console.error("Lỗi chi tiết từ Google:", data);
         alert(`Lỗi API: ${data.error?.message || 'Không xác định'}`);
@@ -351,8 +381,6 @@ const App = () => {
       
       if(data.candidates?.[0]?.content?.parts?.[0]?.text) {
         let textResponse = data.candidates[0].content.parts[0].text;
-        
-        // Loại bỏ Markdown block (```json ... ```) nếu AI lỡ sinh ra
         textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
         
         let generatedEvents = [];
@@ -709,13 +737,23 @@ const App = () => {
                       className="w-full h-32 bg-white/60 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl p-4 text-sm font-medium outline-none resize-none focus:ring-2 focus:ring-violet-500 placeholder:text-slate-400 border border-white/50 dark:border-slate-700/50 shadow-inner"
                     ></textarea>
                     
-                    <button 
-                      onClick={handleAIPlan}
-                      disabled={isGeneratingAI || !aiPrompt.trim()}
-                      className="w-full mt-4 bg-violet-600 hover:bg-violet-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-violet-200 dark:shadow-none transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isGeneratingAI ? <><Loader2 size={18} className="animate-spin" /> Đang phân tích...</> : 'Tạo kế hoạch thông minh'}
-                    </button>
+                    <div className="flex gap-2 mt-4">
+                      <button 
+                        onClick={handleVoiceInput}
+                        title="Nhập bằng giọng nói"
+                        className={`flex items-center justify-center p-4 rounded-2xl border transition-all duration-300 ${isListening ? 'bg-red-50 dark:bg-red-900/30 border-red-500 text-red-500 animate-pulse' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-95'}`}
+                      >
+                        <Mic size={24} />
+                      </button>
+                      
+                      <button 
+                        onClick={handleAIPlan}
+                        disabled={isGeneratingAI || !aiPrompt.trim()}
+                        className="flex-1 bg-violet-600 hover:bg-violet-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-violet-200 dark:shadow-none transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {isGeneratingAI ? <><Loader2 size={18} className="animate-spin" /> Đang phân tích...</> : 'Tạo kế hoạch thông minh'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
