@@ -153,25 +153,25 @@ const App = () => {
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [showIosInstall, setShowIosInstall] = useState(false);
 
+  // --- STATES CHO THÔNG BÁO PLAN ---
+  const [notifiedEvents, setNotifiedEvents] = useState(new Set());
+
   // --- LOGIC NHẬN DIỆN VÀ MỜI CÀI ĐẶT PWA ---
   useEffect(() => {
-    // 1. Dành cho Android / Chrome PC
     const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault(); // Ngăn trình duyệt tự bật thông báo mặc định
+      e.preventDefault(); 
       setDeferredPrompt(e);
-      setShowInstallBanner(true); // Bật banner mời cài đặt của mình
+      setShowInstallBanner(true); 
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // 2. Dành riêng cho iPhone (iOS Safari)
     const isIos = () => {
       const userAgent = window.navigator.userAgent.toLowerCase();
       return /iphone|ipad|ipod/.test(userAgent);
     };
-    // Kiểm tra xem đã cài ra Home Screen chưa
+    
     const isInStandaloneMode = () => ('standalone' in window.navigator) && (window.navigator.standalone);
 
-    // Nếu là iOS và chưa cài đặt, hiện hướng dẫn sau 2 giây
     if (isIos() && !isInStandaloneMode()) {
       const timer = setTimeout(() => setShowIosInstall(true), 2000);
       return () => clearTimeout(timer);
@@ -198,6 +198,35 @@ const App = () => {
     }
   }, []);
 
+  // --- HỆ THỐNG KIỂM TRA GIỜ SỰ KIỆN (PLAN NOTIFICATION) ---
+  useEffect(() => {
+    const checkSchedule = setInterval(() => {
+      const now = new Date();
+      const currentH = String(now.getHours()).padStart(2, '0');
+      const currentM = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${currentH}:${currentM}`;
+      const currentDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      events.forEach(ev => {
+        // Nếu trùng ngày, trùng giờ và chưa thông báo lần nào
+        if (ev.date === currentDateStr && ev.startTime === currentTimeStr && !notifiedEvents.has(ev.id)) {
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("Sắp đến giờ rồi! 📅", {
+              body: `Sự kiện: ${ev.title} bắt đầu lúc ${ev.startTime}`,
+              icon: "/logo192.png",
+              requireInteraction: true
+            });
+            // Đánh dấu đã thông báo
+            setNotifiedEvents(prev => new Set(prev).add(ev.id));
+          }
+        }
+      });
+    }, 10000); // Quét mỗi 10 giây để đảm bảo độ chính xác
+
+    return () => clearInterval(checkSchedule);
+  }, [events, notifiedEvents]);
+
+  // --- FIREBASE LOGIC ---
   useEffect(() => {
     const initAuth = async () => {
       try {
