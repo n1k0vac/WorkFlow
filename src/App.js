@@ -4,31 +4,31 @@ import {
   getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, updateDoc
 } from 'firebase/firestore';
 import { 
-  getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
+  getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  Plus, Trash2, CheckCircle, Circle, Play, Pause, RotateCcw, Clock, 
+  Plus, Trash2, CheckCircle, Play, Pause, RotateCcw, Clock, 
   CheckSquare, Bell, BellOff, Settings, X, Loader2, PartyPopper, Coffee, 
   Sun, Moon, Layout, Maximize2, Minimize2, Calendar as CalendarIcon, 
   Sparkles, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
-// --- Khởi tạo Firebase ---
+// --- Khởi tạo Firebase (Đã bảo mật API Key) ---
 const firebaseConfig = {
-  apiKey: "AIzaSyCtwzMGOI4NvYQUdnIixYIV8xW7K61qzdY",
-  authDomain: "workflow-bb753.firebaseapp.com",
-  projectId: "workflow-bb753",
-  storageBucket: "workflow-bb753.firebasestorage.app",
-  messagingSenderId: "608288170073",
-  appId: "1:608288170073:web:056cb8e6e2c4425b151148",
-  measurementId: "G-LQDP02Y66S"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, // Yêu cầu thêm vào Vercel Environment Variables
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "workflow-bb753.firebaseapp.com",
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "workflow-bb753",
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "workflow-bb753.firebasestorage.app",
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "608288170073",
+  appId: process.env.REACT_APP_FIREBASE_APP_ID, // Yêu cầu thêm vào Vercel Environment Variables
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-LQDP02Y66S"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'focus-flow-app';
 
-// AI API Key (provided by environment)
+// AI API Key (Bảo mật qua Environment Variable)
 const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
 
 // --- Custom Time Picker Component ---
@@ -38,7 +38,6 @@ const CustomTimePicker = ({ value, onChange }) => {
   const hoursRef = useRef(null);
   const minutesRef = useRef(null);
 
-  // Đóng picker khi click ra ngoài
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target)) setIsOpen(false);
@@ -47,7 +46,6 @@ const CustomTimePicker = ({ value, onChange }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Tự động cuộn mượt mà đến giờ đang chọn
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => {
@@ -107,16 +105,11 @@ const CustomTimePicker = ({ value, onChange }) => {
 // --- Helper Functions ---
 const formatDisplayDate = (dateStr) => {
   if (!dateStr) return 'Sắp diễn ra';
-  
-  // Tách chuỗi YYYY-MM-DD để khởi tạo chính xác múi giờ local
   const [y, m, d] = dateStr.split('-');
   const date = new Date(y, m - 1, d);
   const today = new Date();
 
-  // Kiểm tra nếu là hôm nay
   if (date.toDateString() === today.toDateString()) return 'Hôm nay';
-
-  // Format sang "Thứ 2, 27 Thg 4" (ngôn ngữ vi-VN)
   return new Intl.DateTimeFormat('vi-VN', { 
     weekday: 'short', day: 'numeric', month: 'short' 
   }).format(date);
@@ -127,7 +120,7 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   
   // --- States: Tabs & Focus Mode ---
-  const [activeTab, setActiveTab] = useState('focus'); // 'focus' | 'plan'
+  const [activeTab, setActiveTab] = useState('focus'); 
   const [tasks, setTasks] = useState([]);
   const [inputValue, setInputValue] = useState('');
   
@@ -149,34 +142,28 @@ const App = () => {
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   
-  // Inline Event Form (Master-Detail)
   const [showInlineForm, setShowInlineForm] = useState(false);
   const [selectedDateStr, setSelectedDateStr] = useState('');
   const [newEvent, setNewEvent] = useState({ title: '', startTime: '09:00', endTime: '10:00' });
   const [addToFocus, setAddToFocus] = useState(true);
 
-  // 1. Xử lý Authentication
-useEffect(() => {
-  const initAuth = async () => {
-    try {
-      // Chỉ cần dòng này là đủ để Firebase cho phép bạn đọc/ghi dữ liệu ẩn danh
-      await signInAnonymously(auth);
-    } catch (error) {
-      console.error("Auth error:", error);
-    }
-  };
-  initAuth();
-  
-  // Lắng nghe trạng thái đăng nhập để set User vào State
-  const unsubscribe = onAuthStateChanged(auth, setUser);
-  return () => unsubscribe();
-}, []);
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
 
-  // 2. Lắng nghe dữ liệu (Tasks, Settings, Events)
   useEffect(() => {
     if (!user) return;
 
-    // Tasks
     const tasksCol = collection(db, 'artifacts', appId, 'users', user.uid, 'tasks');
     const unsubscribeTasks = onSnapshot(tasksCol, (snapshot) => {
       const taskList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -184,14 +171,12 @@ useEffect(() => {
       setLoading(false);
     });
 
-    // Events
     const eventsCol = collection(db, 'artifacts', appId, 'users', user.uid, 'events');
     const unsubscribeEvents = onSnapshot(eventsCol, (snapshot) => {
       const eventList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setEvents(eventList);
     });
 
-    // Settings
     const settingsDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'timer');
     const unsubscribeSettings = onSnapshot(settingsDoc, (docSnap) => {
       if (docSnap.exists()) {
@@ -210,7 +195,6 @@ useEffect(() => {
     return () => { unsubscribeTasks(); unsubscribeEvents(); unsubscribeSettings(); };
   }, [user, timerMode]);
 
-  // --- Logic Focus Mode (Timer) ---
   useEffect(() => {
     if (isActive && timeLeft > 0) {
       timerRef.current = setInterval(() => setTimeLeft(p => p - 1), 1000);
@@ -247,7 +231,6 @@ useEffect(() => {
     setTimeLeft(mode === 'work' ? settings.workTime * 60 : settings.breakTime * 60);
   };
 
-  // --- Logic Tasks ---
   const addTask = async (e) => {
     e.preventDefault();
     if (!inputValue.trim() || !user) return;
@@ -256,16 +239,17 @@ useEffect(() => {
       setInputValue('');
     } catch (e) { console.error(e); }
   };
+  
   const toggleTask = async (task) => {
     if (!user) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { completed: !task.completed });
   };
+  
   const deleteTask = async (taskId) => {
     if (!user) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
   };
 
-  // --- Logic Lịch & AI (Plan Mode) ---
   const daysInMonth = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth() + 1, 0).getDate();
   const startDayOfMonth = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1).getDay();
   const adjustedStartDay = startDayOfMonth === 0 ? 6 : startDayOfMonth - 1;
@@ -279,7 +263,7 @@ useEffect(() => {
     if(!day) return;
     const dateStr = formatDateObj(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), day);
     setSelectedDateStr(dateStr);
-    setShowInlineForm(false); // Ẩn form khi chuyển ngày để tránh nhập nhầm
+    setShowInlineForm(false);
     setNewEvent({ title: '', startTime: '09:00', endTime: '10:00' });
   };
 
@@ -318,10 +302,11 @@ useEffect(() => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', eventId));
   }
 
-  // Generate AI Events
+  // --- Logic API AI Planner ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
     setIsGeneratingAI(true);
+    
     try {
       const today = new Date();
       const promptContext = `Ngữ cảnh: Hôm nay là ${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}. Dựa vào yêu cầu sau, hãy trích xuất các sự kiện cần làm. Trả về đúng 1 mảng JSON chứa các object sự kiện.\n\nYêu cầu: ${aiPrompt}`;
@@ -346,30 +331,39 @@ useEffect(() => {
         }
       };
 
-    // 1. ĐỔI ĐƯỜNG DẪN v1 THÀNH v1beta Ở ĐÂY
-const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-  method: "POST", 
-  headers: { "Content-Type": "application/json" }, 
-  body: JSON.stringify(payload)
-});
+      // Đã cập nhật lên v1beta
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify(payload)
+      });
       
-const data = await res.json();
-
-// 2. THÊM ĐOẠN BẮT LỖI CHI TIẾT NÀY VÀO
-if (!res.ok) {
-  console.error("Lỗi chi tiết từ Google:", data);
-  // Bắn alert ra màn hình cho dễ đọc
-  alert(`Bị Google từ chối rồi:\n${data.error?.message || 'Lỗi không xác định'}`);
-  setIsGeneratingAI(false);
-  return;
-}
-
-// ... đoạn code xử lý kết quả bên dưới giữ nguyên
-      
+      // Khai báo data một lần duy nhất
       const data = await res.json();
+
+      // Bắt lỗi 400 Bad Request
+      if (!res.ok) {
+        console.error("Lỗi chi tiết từ Google:", data);
+        alert(`Lỗi API: ${data.error?.message || 'Không xác định'}`);
+        setIsGeneratingAI(false);
+        return;
+      }
+      
       if(data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const textResponse = data.candidates[0].content.parts[0].text;
-        const generatedEvents = JSON.parse(textResponse);
+        let textResponse = data.candidates[0].content.parts[0].text;
+        
+        // Loại bỏ Markdown block (```json ... ```) nếu AI lỡ sinh ra
+        textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        let generatedEvents = [];
+        try {
+          generatedEvents = JSON.parse(textResponse);
+        } catch (parseError) {
+          console.error("Lỗi parse JSON:", parseError);
+          alert("Dữ liệu AI trả về bị lỗi định dạng. Vui lòng thử lại!");
+          setIsGeneratingAI(false);
+          return;
+        }
         
         for(const ev of generatedEvents) {
           const evId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
@@ -395,16 +389,14 @@ if (!res.ok) {
     setIsGeneratingAI(false);
   };
 
-  // --- Utils ---
   const saveSettings = async (newSettings) => {
     if (!user) return;
     try { await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'timer'), { ...settings, ...newSettings }); } catch (e) { console.error(e); }
   };
+  
   const toggleTheme = () => saveSettings({ theme: settings.theme === 'light' ? 'dark' : 'light' });
   const formatTime = (sec) => `${Math.floor(sec / 60).toString().padStart(2, '0')}:${(sec % 60).toString().padStart(2, '0')}`;
 
-  // --- Nâng cấp: Tối ưu nhóm sự kiện (Group by Date) bằng useMemo ---
-  // LƯU Ý QUAN TRỌNG: Tất cả các React Hook phải được gọi TRƯỚC bất kỳ lệnh `return` nào.
   const groupedEvents = useMemo(() => {
     const map = {};
     events.forEach(ev => {
@@ -417,7 +409,6 @@ if (!res.ok) {
     return map;
   }, [events]);
 
-  // --- Master-Detail Calculations ---
   const todayStr = formatDateObj(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
   const isViewingSpecificDate = selectedDateStr && selectedDateStr !== todayStr;
   
@@ -427,7 +418,6 @@ if (!res.ok) {
     ? (groupedEvents[selectedDateStr] || [])
     : events.filter(e => e.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)).slice(0, 4);
 
-  // Early return phải nằm DƯỚI CÙNG sau tất cả các Hook để đảm bảo nguyên tắc của React
   if (!user) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -490,7 +480,6 @@ if (!res.ok) {
             <h1 className="text-xl font-black tracking-tight uppercase">FocusFlow</h1>
           </div>
           
-          {/* TAB NAVIGATION (Hidden on mobile) */}
           <div className="hidden md:flex bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-2xl shadow-inner border border-slate-200/50 dark:border-slate-700/50">
             <button onClick={() => setActiveTab('focus')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all duration-200 ease-out active:scale-95 ${activeTab === 'focus' ? 'bg-white dark:bg-slate-700 text-violet-600 dark:text-violet-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
               <Clock size={18} /> Focus
@@ -579,7 +568,6 @@ if (!res.ok) {
           {/* TAB: PLAN (LỊCH & AI) */}
           <div className={`transition-all duration-500 ${activeTab === 'plan' ? 'block opacity-100' : 'hidden opacity-0'}`}>
             
-            {/* Header Lịch */}
             <div className="flex items-center justify-between mb-6 md:mb-8">
               <h2 className="text-4xl md:text-7xl font-black lowercase tracking-tighter capitalize">
                 {currentMonthDate.toLocaleString('vi-VN', { month: 'long' })}
@@ -595,7 +583,6 @@ if (!res.ok) {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               
-              {/* LỊCH TRÁI (Bubble Grid - Master) */}
               <div className="lg:col-span-8 bg-white dark:bg-slate-800 rounded-[2rem] md:rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.1)] dark:shadow-none border border-slate-100 dark:border-slate-700 overflow-hidden flex flex-col p-4 md:p-6">
                 <div className="grid grid-cols-7 mb-2 md:mb-4">
                   {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((d, i) => (
@@ -606,12 +593,10 @@ if (!res.ok) {
                 </div>
                 
                 <div className="flex-1 grid grid-cols-7 gap-1 md:gap-2">
-                  {/* Empty cells padding */}
                   {Array.from({ length: adjustedStartDay }).map((_, i) => (
                     <div key={`empty-${i}`} className="aspect-square opacity-0 pointer-events-none"></div>
                   ))}
                   
-                  {/* Days */}
                   {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
                     const dateStr = formatDateObj(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), day);
@@ -629,7 +614,6 @@ if (!res.ok) {
                           {day}
                         </span>
                         
-                        {/* Event Dots */}
                         <div className="flex gap-1 mt-1 h-2 flex-wrap justify-center w-full px-1">
                           {dayEvents.slice(0, 3).map(ev => (
                             <div key={ev.id} className="w-1.5 h-1.5 rounded-full bg-violet-500"></div>
@@ -644,10 +628,8 @@ if (!res.ok) {
                 </div>
               </div>
 
-              {/* SMART PLAN PHẢI (Detail & AI) */}
               <div className="lg:col-span-4 space-y-6">
                 
-                {/* Khu vực Detail / Sự kiện trong ngày */}
                 <div className="bg-white dark:bg-slate-800 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 border border-slate-100 dark:border-slate-700 flex flex-col transition-all">
                   <div className="flex justify-between items-center mb-6">
                     <h3 className="text-xl md:text-2xl font-black capitalize">{panelTitle}</h3>
@@ -663,7 +645,6 @@ if (!res.ok) {
                     </button>
                   </div>
 
-                  {/* Inline Event Form */}
                   {showInlineForm && (
                     <div className="mb-6 bg-slate-50 dark:bg-slate-900/50 rounded-[1.5rem] p-5 border border-slate-100 dark:border-slate-700 animate-in fade-in slide-in-from-top-4 duration-300">
                       <input 
@@ -676,22 +657,12 @@ if (!res.ok) {
                       <div className="flex flex-col gap-4">
                         <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-4 py-3 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
                           <Clock size={18} className="text-violet-500 opacity-80 shrink-0" />
-                          <CustomTimePicker 
-                            value={newEvent.startTime} 
-                            onChange={v => setNewEvent({...newEvent, startTime: v})} 
-                          />
+                          <CustomTimePicker value={newEvent.startTime} onChange={v => setNewEvent({...newEvent, startTime: v})} />
                           <span className="text-slate-300 font-black shrink-0">-</span>
-                          <CustomTimePicker 
-                            value={newEvent.endTime} 
-                            onChange={v => setNewEvent({...newEvent, endTime: v})} 
-                          />
+                          <CustomTimePicker value={newEvent.endTime} onChange={v => setNewEvent({...newEvent, endTime: v})} />
                         </div>
                         
-                        {/* Sync to Focus Toggle */}
-                        <div 
-                          className="flex items-center gap-3 cursor-pointer group w-max transition-all duration-200 ease-out active:scale-95 mt-1"
-                          onClick={() => setAddToFocus(!addToFocus)}
-                        >
+                        <div className="flex items-center gap-3 cursor-pointer group w-max transition-all duration-200 ease-out active:scale-95 mt-1" onClick={() => setAddToFocus(!addToFocus)}>
                           <div className={`w-5 h-5 rounded-md flex items-center justify-center transition-all ${addToFocus ? 'bg-violet-600 text-white scale-110 shadow-md shadow-violet-200 dark:shadow-none' : 'bg-slate-200 dark:bg-slate-700 text-transparent group-hover:bg-slate-300 dark:group-hover:bg-slate-600'}`}>
                             <CheckCircle size={12} strokeWidth={4} />
                           </div>
@@ -716,11 +687,7 @@ if (!res.ok) {
                           <p className="font-bold text-sm truncate">{ev.title}</p>
                           <p className="text-xs text-slate-500 mt-1">{ev.date} • {ev.startTime}</p>
                         </div>
-                        <button 
-                          onClick={(e) => handleDeleteEvent(ev.id, e)} 
-                          className="absolute right-1 md:right-3 top-1/2 -translate-y-1/2 text-slate-400 md:text-slate-300 hover:text-red-500 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all duration-200 ease-out p-3 md:p-2 active:scale-95"
-                          title="Xóa sự kiện"
-                        >
+                        <button onClick={(e) => handleDeleteEvent(ev.id, e)} className="absolute right-1 md:right-3 top-1/2 -translate-y-1/2 text-slate-400 md:text-slate-300 hover:text-red-500 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all duration-200 ease-out p-3 md:p-2 active:scale-95" title="Xóa sự kiện">
                           <Trash2 size={18} />
                         </button>
                       </div>
@@ -729,7 +696,6 @@ if (!res.ok) {
                   </div>
                 </div>
 
-                {/* AI Planner Prompt */}
                 <div className="bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 border border-violet-100 dark:border-slate-700 relative overflow-hidden">
                   <div className="absolute -top-10 -right-10 text-violet-500/10"><Sparkles size={120} /></div>
                   <div className="relative z-10">
@@ -761,19 +727,11 @@ if (!res.ok) {
         {/* MOBILE BOTTOM NAVIGATION */}
         <div className="fixed bottom-0 left-0 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 md:hidden z-[90] pb-safe">
           <div className="flex justify-around items-center p-2 gap-2">
-            <button 
-              onClick={() => setActiveTab('focus')} 
-              className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all duration-200 ease-out active:scale-95 ${activeTab === 'focus' ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-            >
-              <Clock size={22} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Focus</span>
+            <button onClick={() => setActiveTab('focus')} className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all duration-200 ease-out active:scale-95 ${activeTab === 'focus' ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+              <Clock size={22} /><span className="text-[10px] font-black uppercase tracking-widest">Focus</span>
             </button>
-            <button 
-              onClick={() => setActiveTab('plan')} 
-              className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all duration-200 ease-out active:scale-95 ${activeTab === 'plan' ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-            >
-              <CalendarIcon size={22} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Plan</span>
+            <button onClick={() => setActiveTab('plan')} className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all duration-200 ease-out active:scale-95 ${activeTab === 'plan' ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+              <CalendarIcon size={22} /><span className="text-[10px] font-black uppercase tracking-widest">Plan</span>
             </button>
           </div>
         </div>
@@ -794,41 +752,15 @@ if (!res.ok) {
           .fill-mode-forwards { animation-fill-mode: forwards; }
           .delay-1000 { animation-delay: 1s; }
           
-          /* Tối ưu Time Input: Ẩn AM/PM và mở picker khi click vào số */
-          input[type="time"] {
-            position: relative;
-          }
-          input[type="time"]::-webkit-datetime-edit-ampm-field {
-            display: none;
-          }
-          input[type="time"]::-webkit-calendar-picker-indicator { 
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-          }
+          input[type="time"] { position: relative; }
+          input[type="time"]::-webkit-datetime-edit-ampm-field { display: none; }
+          input[type="time"]::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
           
-          /* Nâng cấp Animation: Khay trượt nảy nhẹ chuẩn iOS */
-          @media (max-width: 767px) {
-            .mobile-bottom-sheet {
-              animation: slideUp 0.4s cubic-bezier(0.32, 0.72, 0, 1) forwards;
-            }
-          }
-          @keyframes slideUp {
-            from { transform: translateY(100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-          }
+          @media (max-width: 767px) { .mobile-bottom-sheet { animation: slideUp 0.4s cubic-bezier(0.32, 0.72, 0, 1) forwards; } }
+          @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
           
-          /* Nâng cấp Animation: Chuyển động mượt cho List Items */
-          .animate-list-item {
-            animation: listItemEnter 0.3s ease-out forwards;
-          }
-          @keyframes listItemEnter {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
+          .animate-list-item { animation: listItemEnter 0.3s ease-out forwards; }
+          @keyframes listItemEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
           
           .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
         `}</style>
