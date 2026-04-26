@@ -6,6 +6,7 @@ import {
 import { 
   getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging'; // Thêm Import FCM
 import { 
   Plus, Trash2, CheckCircle, Play, Pause, RotateCcw, Clock, 
   CheckSquare, Bell, BellOff, Settings, X, Loader2, PartyPopper, Coffee, 
@@ -23,10 +24,19 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID, 
   measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-LQDP02Y66S"
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'focus-flow-app';
+
+// Khởi tạo Messaging an toàn
+let messaging;
+try {
+  messaging = getMessaging(app);
+} catch (error) {
+  console.error("Trình duyệt không hỗ trợ Firebase Messaging", error);
+}
 
 // AI API Key
 const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
@@ -191,14 +201,48 @@ const App = () => {
     }
   };
 
-  // --- TÍCH HỢP XIN QUYỀN THÔNG BÁO ---
+  // --- TÍCH HỢP FIREBASE CLOUD MESSAGING (FCM) ---
   useEffect(() => {
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission();
-    }
-  }, []);
+    if (!user || !messaging) return;
 
-  // --- HỆ THỐNG KIỂM TRA GIỜ SỰ KIỆN (PLAN NOTIFICATION) ---
+    const requestFCMToken = async () => {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          // BẠN CẦN THAY CHUỖI BÊN DƯỚI BẰNG VAPID KEY CỦA BẠN
+          const token = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_HERE' });
+          if (token) {
+            console.log("Đã lấy được FCM Token:", token);
+            // Lưu token vào Firestore để quản lý
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'fcm'), { 
+              token: token,
+              updatedAt: Date.now()
+            }, { merge: true });
+          }
+        }
+      } catch (error) {
+        console.error("Lỗi khi lấy FCM Token:", error);
+      }
+    };
+
+    requestFCMToken();
+
+    // Lắng nghe thông báo đẩy khi App đang được mở (Foreground)
+    const unsubscribeFCM = onMessage(messaging, (payload) => {
+      console.log('Nhận thông báo đẩy từ Cloud:', payload);
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(payload.notification.title, {
+          body: payload.notification.body,
+          icon: "/logo192.png",
+          requireInteraction: true
+        });
+      }
+    });
+
+    return () => unsubscribeFCM();
+  }, [user]);
+
+  // --- HỆ THỐNG KIỂM TRA GIỜ SỰ KIỆN LOCAL (PLAN NOTIFICATION) ---
   useEffect(() => {
     const checkSchedule = setInterval(() => {
       const now = new Date();
@@ -434,8 +478,15 @@ const App = () => {
     setIsGeneratingAI(true);
     
     try {
-      const today = new Date();
-      const promptContext = `Ngữ cảnh: Hôm nay là ${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}. Dựa vào yêu cầu sau, hãy trích xuất các sự kiện cần làm. Trả về đúng 1 mảng JSON chứa các object sự kiện.\n\nYêu cầu: ${aiPrompt}`;
+      const now = new Date();
+      const currentTimeStr = now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      const currentDateStr = now.toISOString().split('T')[0];
+
+      const promptContext = `Ngữ cảnh: Hôm nay là ngày ${currentDateStr}, bây giờ chính xác là ${currentTimeStr}. 
+      Dựa vào yêu cầu sau, hãy trích xuất các sự kiện. Nếu người dùng nói "x phút nữa" hoặc "tí nữa", hãy cộng thêm vào giờ hiện tại (${currentTimeStr}) để ra startTime chính xác. 
+      Trả về 1 mảng JSON các object sự kiện.
+      
+      Yêu cầu: ${aiPrompt}`;
       
       const payload = {
         contents: [{ parts: [{ text: promptContext }] }],
