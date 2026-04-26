@@ -210,7 +210,7 @@ const App = () => {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           // BẠN CẦN THAY CHUỖI BÊN DƯỚI BẰNG VAPID KEY CỦA BẠN
-          const token = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_HERE' });
+          const token = await getToken(messaging, { vapidKey: 'BIRhwJhJ-VUpPPH2A0hUZEmZ5n7cIS1RIIxrAPVc7bbd7e50eoXg-WrvwPnbt4WUdaTm4WWHV6iWK2tdH_Z3sZ0' });
           if (token) {
             console.log("Đã lấy được FCM Token:", token);
             // Lưu token vào Firestore để quản lý
