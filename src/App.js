@@ -209,11 +209,9 @@ const App = () => {
       try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-          // BẠN CẦN THAY CHUỖI BÊN DƯỚI BẰNG VAPID KEY CỦA BẠN
           const token = await getToken(messaging, { vapidKey: 'BIRhwJhJ-VUpPPH2A0hUZEmZ5n7cIS1RIIxrAPVc7bbd7e50eoXg-WrvwPnbt4WUdaTm4WWHV6iWK2tdH_Z3sZ0' });
           if (token) {
             console.log("Đã lấy được FCM Token:", token);
-            // Lưu token vào Firestore để quản lý
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'fcm'), { 
               token: token,
               updatedAt: Date.now()
@@ -227,7 +225,6 @@ const App = () => {
 
     requestFCMToken();
 
-    // Lắng nghe thông báo đẩy khi App đang được mở (Foreground)
     const unsubscribeFCM = onMessage(messaging, (payload) => {
       console.log('Nhận thông báo đẩy từ Cloud:', payload);
       if ("Notification" in window && Notification.permission === "granted") {
@@ -252,7 +249,6 @@ const App = () => {
       const currentDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
       events.forEach(ev => {
-        // Nếu trùng ngày, trùng giờ và chưa thông báo lần nào
         if (ev.date === currentDateStr && ev.startTime === currentTimeStr && !notifiedEvents.has(ev.id)) {
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification("Sắp đến giờ rồi! 📅", {
@@ -260,12 +256,11 @@ const App = () => {
               icon: "/logo192.png",
               requireInteraction: true
             });
-            // Đánh dấu đã thông báo
             setNotifiedEvents(prev => new Set(prev).add(ev.id));
           }
         }
       });
-    }, 10000); // Quét mỗi 10 giây để đảm bảo độ chính xác
+    }, 10000);
 
     return () => clearInterval(checkSchedule);
   }, [events, notifiedEvents]);
@@ -473,7 +468,7 @@ const App = () => {
     recognition.start();
   };
 
-  // --- HÀM TẠO LỘ TRÌNH THÔNG MINH BẰNG AI (BATCH WRITE) ---
+  // --- HÀM TẠO LỘ TRÌNH THÔNG MINH BẰNG AI (ĐÃ ĐƯỢC FIX LỖI API) ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
     setIsGeneratingAI(true);
@@ -483,7 +478,6 @@ const App = () => {
       const currentTimeStr = now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
       const currentDateStr = now.toISOString().split('T')[0];
 
-      // Prompt được nâng cấp để hiểu cả lịch ngắn hạn và dài hạn
       const promptContext = `Ngữ cảnh: Hôm nay là ngày ${currentDateStr}, bây giờ chính xác là ${currentTimeStr}. 
       Bạn là chuyên gia lập kế hoạch. Dựa vào yêu cầu sau, hãy phân tích:
       - Nếu là sự kiện ngắn hạn (như "chiều nay họp", "5 phút nữa"), hãy cộng thời gian chuẩn xác với ${currentTimeStr}.
@@ -512,19 +506,51 @@ const App = () => {
         }
       };
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify(payload)
-      });
-      
-      const data = await res.json();
+      let data = null;
+      let isSuccess = false;
+      const MAX_RETRIES = 3;
 
-      if (!res.ok) {
-        console.error("Lỗi chi tiết từ Google:", data);
-        alert(`Lỗi API: ${data.error?.message || 'Không xác định'}`);
-        setIsGeneratingAI(false);
-        return;
+      // Vòng lặp Retry Logic chống sập API
+      for (let i = 0; i < MAX_RETRIES; i++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // Ngắt kết nối nếu đợi quá 15s
+
+          // Lưu ý: Đã đổi model sang gemini-1.5-flash để đảm bảo tính ổn định cao nhất
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            method: "POST", 
+            headers: { "Content-Type": "application/json" }, 
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+
+          if (res.status === 429 || res.status >= 500) {
+            console.warn(`Server bận (Lỗi ${res.status}), đang thử lại lần ${i + 1}...`);
+            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Đợi lâu dần sau mỗi lần lỗi
+            continue;
+          }
+
+          data = await res.json();
+
+          if (!res.ok) {
+            throw new Error(data.error?.message || 'Lỗi không xác định từ máy chủ Google');
+          }
+
+          isSuccess = true;
+          break; // Gọi thành công thì thoát vòng lặp Retry
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            console.warn(`Lỗi Timeout (quá giờ), đang thử lại lần ${i + 1}...`);
+          } else if (i === MAX_RETRIES - 1) {
+            throw error; // Quăng lỗi thực sự nếu đã thử hết số lần
+          }
+        }
+      }
+
+      if (!isSuccess || !data) {
+        throw new Error("Không thể kết nối đến máy chủ AI lúc này. Vui lòng thử lại sau vài giây.");
       }
       
       if(data.candidates?.[0]?.content?.parts?.[0]?.text) {
@@ -572,9 +598,10 @@ const App = () => {
       }
     } catch (e) {
       console.error("AI Generation Error", e);
-      alert("Có lỗi khi tạo kế hoạch tự động. Vui lòng thử lại!");
+      alert(`Lỗi: ${e.message}`);
+    } finally {
+      setIsGeneratingAI(false); // Đảm bảo luôn tắt trạng thái loading dù thành công hay thất bại
     }
-    setIsGeneratingAI(false);
   };
 
   const saveSettings = async (newSettings) => {
