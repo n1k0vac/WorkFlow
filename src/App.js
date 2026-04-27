@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, updateDoc
+  getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, updateDoc, writeBatch
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging'; // Thêm Import FCM
+import { getMessaging, getToken, onMessage } from 'firebase/messaging'; 
 import { 
   Plus, Trash2, CheckCircle, Play, Pause, RotateCcw, Clock, 
   CheckSquare, Bell, BellOff, Settings, X, Loader2, PartyPopper, Coffee, 
   Sun, Moon, Layout, Maximize2, Minimize2, Calendar as CalendarIcon, 
-  Sparkles, ChevronLeft, ChevronRight, Mic
+  Sparkles, ChevronLeft, ChevronRight, Mic, Target
 } from 'lucide-react';
 
 // --- Khởi tạo Firebase (Đã bảo mật API Key) ---
@@ -473,6 +473,7 @@ const App = () => {
     recognition.start();
   };
 
+  // --- HÀM TẠO LỘ TRÌNH THÔNG MINH BẰNG AI (BATCH WRITE) ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
     setIsGeneratingAI(true);
@@ -482,9 +483,12 @@ const App = () => {
       const currentTimeStr = now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
       const currentDateStr = now.toISOString().split('T')[0];
 
+      // Prompt được nâng cấp để hiểu cả lịch ngắn hạn và dài hạn
       const promptContext = `Ngữ cảnh: Hôm nay là ngày ${currentDateStr}, bây giờ chính xác là ${currentTimeStr}. 
-      Dựa vào yêu cầu sau, hãy trích xuất các sự kiện. Nếu người dùng nói "x phút nữa" hoặc "tí nữa", hãy cộng thêm vào giờ hiện tại (${currentTimeStr}) để ra startTime chính xác. 
-      Trả về 1 mảng JSON các object sự kiện.
+      Bạn là chuyên gia lập kế hoạch. Dựa vào yêu cầu sau, hãy phân tích:
+      - Nếu là sự kiện ngắn hạn (như "chiều nay họp", "5 phút nữa"), hãy cộng thời gian chuẩn xác với ${currentTimeStr}.
+      - Nếu là mục tiêu dài hạn (như "lộ trình zero to hero"), hãy chia nhỏ thành các task hàng ngày, mỗi task không quá 2 tiếng.
+      Trả về ĐÚNG MỘT MẢNG JSON các object sự kiện. Không kèm chữ giải thích thêm.
       
       Yêu cầu: ${aiPrompt}`;
       
@@ -537,22 +541,34 @@ const App = () => {
           return;
         }
         
+        // Sử dụng Firestore Batch Write để đẩy toàn bộ lộ trình lên Cloud cùng một lúc
+        const batch = writeBatch(db);
+        let count = 0;
+
         for(const ev of generatedEvents) {
           const evId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-          const createdAt = Date.now();
+          const createdAt = Date.now() + count; // Tăng nhẹ mili-giây để sắp xếp đúng thứ tự
           
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', evId), {
+          // Thêm Event vào Batch
+          const eventRef = doc(db, 'artifacts', appId, 'users', user.uid, 'events', evId);
+          batch.set(eventRef, {
             title: ev.title, date: ev.date, startTime: ev.startTime, endTime: ev.endTime || "23:59", createdAt
           });
           
-          const taskId = evId + '_task';
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId), {
-            text: `[${ev.startTime}] ${ev.title}`,
+          // Thêm Task vào Batch để hiện bên mục Focus
+          const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', evId + '_task');
+          batch.set(taskRef, {
+            text: `[${ev.date.slice(5)}] ${ev.title}`,
             completed: false,
             createdAt
           });
+
+          count++;
         }
+
+        await batch.commit(); // Gửi toàn bộ gói dữ liệu lên Firebase
         setAiPrompt('');
+        alert(`🎉 AI đã tạo thành công lộ trình gồm ${generatedEvents.length} bước vào lịch của bạn!`);
       }
     } catch (e) {
       console.error("AI Generation Error", e);
@@ -589,6 +605,11 @@ const App = () => {
   const displayEvents = isViewingSpecificDate
     ? (groupedEvents[selectedDateStr] || [])
     : events.filter(e => e.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)).slice(0, 4);
+
+  // Tính toán Tiến độ lộ trình (Roadmap Progress Calculation)
+  const totalTasksCount = tasks.length;
+  const completedTasksCount = tasks.filter(t => t.completed).length;
+  const progressPercent = totalTasksCount === 0 ? 0 : Math.round((completedTasksCount / totalTasksCount) * 100);
 
   if (!user) {
     return (
@@ -828,6 +849,28 @@ const App = () => {
               </div>
 
               <div className="lg:col-span-4 space-y-6">
+
+                {/* TIẾN ĐỘ LỘ TRÌNH (Progress Bar) */}
+                <div className="bg-white dark:bg-slate-800 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 border border-slate-100 dark:border-slate-700">
+                  <div className="flex justify-between items-end mb-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400 mb-1">
+                        <Target size={18} />
+                        <h3 className="text-lg font-black">Tiến độ lộ trình</h3>
+                      </div>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{completedTasksCount}/{totalTasksCount} mục tiêu</p>
+                    </div>
+                    <span className="text-3xl font-black text-violet-600 leading-none">{progressPercent}%</span>
+                  </div>
+                  <div className="h-3 md:h-4 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden shadow-inner">
+                    <div 
+                      className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-1000 ease-out relative" 
+                      style={{ width: `${progressPercent}%` }}
+                    >
+                      <div className="absolute inset-0 bg-white/20 w-full h-full animate-pulse"></div>
+                    </div>
+                  </div>
+                </div>
                 
                 <div className="bg-white dark:bg-slate-800 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 border border-slate-100 dark:border-slate-700 flex flex-col transition-all">
                   <div className="flex justify-between items-center mb-6">
@@ -899,12 +942,12 @@ const App = () => {
                   <div className="absolute -top-10 -right-10 text-violet-500/10"><Sparkles size={120} /></div>
                   <div className="relative z-10">
                     <div className="inline-flex items-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase mb-6">
-                      <Sparkles size={12} /> AI Planner
+                      <Sparkles size={12} /> AI Planner (Lộ trình)
                     </div>
                     <textarea 
                       value={aiPrompt}
                       onChange={(e) => setAiPrompt(e.target.value)}
-                      placeholder="VD: Chiều mai 2h họp dự án, 5h đi tập gym. Sáng T7 8h học Tiếng Anh..."
+                      placeholder="VD: Tôi muốn học xong Zero to Hero trong 30 ngày..."
                       className="w-full h-32 bg-white/60 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl p-4 text-sm font-medium outline-none resize-none focus:ring-2 focus:ring-violet-500 placeholder:text-slate-400 border border-white/50 dark:border-slate-700/50 shadow-inner"
                     ></textarea>
                     
