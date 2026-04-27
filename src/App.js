@@ -434,7 +434,6 @@ const App = () => {
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'events', eventId));
   }
 
-  // --- BẮT LỖI MIC ĐẶC THÙ CHO IPHONE (iOS) ---
   const handleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -468,7 +467,79 @@ const App = () => {
     recognition.start();
   };
 
-  // --- HÀM TẠO LỘ TRÌNH THÔNG MINH BẰNG AI (ĐÃ ĐƯỢC FIX LỖI API) ---
+  // --- CÁC HÀM GỌI API RIÊNG BIỆT (FALLBACK SYSTEM) ---
+  
+  // 1. Provider: Gemini 2.5 Flash (Google)
+  const callGemini = async (promptContext, signal) => {
+    const payload = {
+      contents: [{ parts: [{ text: promptContext }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING" },
+              date: { type: "STRING", description: "Format: YYYY-MM-DD" },
+              startTime: { type: "STRING", description: "Format: HH:MM" },
+              endTime: { type: "STRING", description: "Format: HH:MM" }
+            },
+            required: ["title", "date", "startTime"]
+          }
+        }
+      }
+    };
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal
+    });
+    
+    if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(`Gemini Error: ${errorData.error?.message || res.status}`);
+    }
+    const data = await res.json();
+    let textRes = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textRes) throw new Error("Gemini trả về rỗng");
+    
+    return JSON.parse(textRes.replace(/```json/g, '').replace(/```/g, '').trim());
+  };
+
+  // 2. Provider: Groq (Llama 3)
+  const callGroq = async (promptContext, signal) => {
+    const groqApiKey = process.env.REACT_APP_GROQ_API_KEY; 
+    if (!groqApiKey) throw new Error("Chưa cấu hình Groq Key");
+
+    const payload = {
+      model: "llama3-8b-8192", 
+      messages: [
+        { role: "system", content: "Bạn là chuyên gia lập kế hoạch. Chỉ trả về JSON array hợp lệ. Format: [{\"title\":\"...\",\"date\":\"YYYY-MM-DD\",\"startTime\":\"HH:MM\",\"endTime\":\"HH:MM\"}]" },
+        { role: "user", content: promptContext }
+      ],
+      response_format: { type: "json_object" } 
+    };
+
+    const res = await fetch(`https://api.groq.com/openai/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal
+    });
+
+    if (!res.ok) throw new Error(`Groq Error: ${res.status}`);
+    const data = await res.json();
+    const content = data.choices[0]?.message?.content;
+    
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : (parsed.events || parsed.plan || Object.values(parsed)[0]);
+  };
+
+  // 3. Provider: Dự phòng
+  const callBackupProvider = async (promptContext, signal) => {
+    throw new Error("Backup Provider chưa cấu hình");
+  };
+
+  // --- HÀM CHÍNH VỚI LOGIC FALLBACK ---
   const handleAIPlan = async () => {
     if (!aiPrompt.trim() || !user) return;
     setIsGeneratingAI(true);
@@ -486,121 +557,74 @@ const App = () => {
       
       Yêu cầu: ${aiPrompt}`;
       
-      const payload = {
-        contents: [{ parts: [{ text: promptContext }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                date: { type: "STRING", description: "Format: YYYY-MM-DD" },
-                startTime: { type: "STRING", description: "Format: HH:MM" },
-                endTime: { type: "STRING", description: "Format: HH:MM" }
-              },
-              required: ["title", "date", "startTime"]
-            }
-          }
-        }
-      };
+      const aiProviders = [
+        { name: "Gemini 2.5 Flash", fetcher: callGemini },
+        { name: "Groq Llama3", fetcher: callGroq },
+        { name: "Backup AI", fetcher: callBackupProvider }
+      ];
 
-      let data = null;
-      let isSuccess = false;
-      const MAX_RETRIES = 3;
+      let generatedEvents = null;
+      let successfulProvider = "";
 
-      // Vòng lặp Retry Logic chống sập API
-      for (let i = 0; i < MAX_RETRIES; i++) {
+      // Vòng lặp quét Fallback
+      for (const provider of aiProviders) {
         try {
+          console.log(`Đang gọi ${provider.name}...`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // Ngắt kết nối nếu đợi quá 15s
+          const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout per provider
 
-          // Lưu ý: Đã đổi model sang gemini-1.5-flash để đảm bảo tính ổn định cao nhất
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-            method: "POST", 
-            headers: { "Content-Type": "application/json" }, 
-            body: JSON.stringify(payload),
-            signal: controller.signal
-          });
-          
+          generatedEvents = await provider.fetcher(promptContext, controller.signal);
           clearTimeout(timeoutId);
 
-          if (res.status === 429 || res.status >= 500) {
-            console.warn(`Server bận (Lỗi ${res.status}), đang thử lại lần ${i + 1}...`);
-            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Đợi lâu dần sau mỗi lần lỗi
-            continue;
+          if (generatedEvents && Array.isArray(generatedEvents) && generatedEvents.length > 0) {
+            successfulProvider = provider.name;
+            break; 
           }
-
-          data = await res.json();
-
-          if (!res.ok) {
-            throw new Error(data.error?.message || 'Lỗi không xác định từ máy chủ Google');
-          }
-
-          isSuccess = true;
-          break; // Gọi thành công thì thoát vòng lặp Retry
         } catch (error) {
-          if (error.name === 'AbortError') {
-            console.warn(`Lỗi Timeout (quá giờ), đang thử lại lần ${i + 1}...`);
-          } else if (i === MAX_RETRIES - 1) {
-            throw error; // Quăng lỗi thực sự nếu đã thử hết số lần
-          }
+          console.warn(`[Fallback] ${provider.name} thất bại:`, error.message);
         }
       }
 
-      if (!isSuccess || !data) {
-        throw new Error("Không thể kết nối đến máy chủ AI lúc này. Vui lòng thử lại sau vài giây.");
+      if (!generatedEvents) {
+        throw new Error("Tất cả các máy chủ AI đều đang quá tải. Vui lòng thử lại sau!");
       }
       
-      if(data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        let textResponse = data.candidates[0].content.parts[0].text;
-        textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for(const ev of generatedEvents) {
+        if (!ev.title || !ev.date || !ev.startTime) continue; 
+
+        const evId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+        const createdAt = Date.now() + count; 
         
-        let generatedEvents = [];
-        try {
-          generatedEvents = JSON.parse(textResponse);
-        } catch (parseError) {
-          console.error("Lỗi parse JSON:", parseError);
-          alert("Dữ liệu AI trả về bị lỗi định dạng. Vui lòng thử lại!");
-          setIsGeneratingAI(false);
-          return;
-        }
+        const eventRef = doc(db, 'artifacts', appId, 'users', user.uid, 'events', evId);
+        batch.set(eventRef, {
+          title: ev.title, date: ev.date, startTime: ev.startTime, endTime: ev.endTime || "23:59", createdAt
+        });
         
-        // Sử dụng Firestore Batch Write để đẩy toàn bộ lộ trình lên Cloud cùng một lúc
-        const batch = writeBatch(db);
-        let count = 0;
+        const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', evId + '_task');
+        batch.set(taskRef, {
+          text: `[${ev.date.slice(5)}] ${ev.title}`,
+          completed: false,
+          createdAt
+        });
 
-        for(const ev of generatedEvents) {
-          const evId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-          const createdAt = Date.now() + count; // Tăng nhẹ mili-giây để sắp xếp đúng thứ tự
-          
-          // Thêm Event vào Batch
-          const eventRef = doc(db, 'artifacts', appId, 'users', user.uid, 'events', evId);
-          batch.set(eventRef, {
-            title: ev.title, date: ev.date, startTime: ev.startTime, endTime: ev.endTime || "23:59", createdAt
-          });
-          
-          // Thêm Task vào Batch để hiện bên mục Focus
-          const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', evId + '_task');
-          batch.set(taskRef, {
-            text: `[${ev.date.slice(5)}] ${ev.title}`,
-            completed: false,
-            createdAt
-          });
+        count++;
+      }
 
-          count++;
-        }
-
-        await batch.commit(); // Gửi toàn bộ gói dữ liệu lên Firebase
+      if (count > 0) {
+        await batch.commit(); 
         setAiPrompt('');
-        alert(`🎉 AI đã tạo thành công lộ trình gồm ${generatedEvents.length} bước vào lịch của bạn!`);
+        alert(`🎉 AI đã tạo thành công lộ trình gồm ${count} bước! (Powered by ${successfulProvider})`);
+      } else {
+         throw new Error("AI trả về kết quả nhưng không đúng định dạng lịch.");
       }
     } catch (e) {
       console.error("AI Generation Error", e);
       alert(`Lỗi: ${e.message}`);
     } finally {
-      setIsGeneratingAI(false); // Đảm bảo luôn tắt trạng thái loading dù thành công hay thất bại
+      setIsGeneratingAI(false);
     }
   };
 
