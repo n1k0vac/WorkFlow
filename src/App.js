@@ -269,14 +269,21 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+        }
       } catch (error) {
         console.error("Auth error:", error);
       }
     };
-    initAuth();
-    
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        initAuth();
+      }
+    });
     return () => unsubscribe();
   }, []);
 
@@ -402,7 +409,7 @@ const App = () => {
   const handleAddManualEvent = async () => {
     if (!newEvent.title.trim() || !user) return;
     if (newEvent.endTime < newEvent.startTime) { 
-      alert('Giờ kết thúc không được sớm hơn giờ bắt đầu!'); 
+      setNotification({ show: true, message: 'Giờ kết thúc không được sớm hơn giờ bắt đầu!', type: 'error' });
       return; 
     }
     const eventId = Date.now().toString();
@@ -438,7 +445,11 @@ const App = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Trình duyệt không hỗ trợ Mic hoặc bạn đang dùng ứng dụng bên thứ 3 (như Zalo/Messenger). Vui lòng mở bằng Safari trên iPhone để dùng tính năng này!");
+      setNotification({
+        show: true,
+        message: "Trình duyệt không hỗ trợ Mic hoặc bạn đang dùng ứng dụng bên thứ 3 (như Zalo/Messenger). Vui lòng mở bằng Safari trên iPhone để dùng tính năng này!",
+        type: 'error'
+      });
       return;
     }
 
@@ -457,7 +468,11 @@ const App = () => {
     recognition.onerror = (event) => {
       console.error("Lỗi Mic:", event.error);
       if (event.error === 'not-allowed') {
-        alert("Micro đang bị chặn! Bạn vui lòng cấp quyền truy cập Micro cho Safari/Trình duyệt trong Cài đặt của máy.");
+        setNotification({
+          show: true,
+          message: "Micro đang bị chặn! Bạn vui lòng cấp quyền truy cập Micro cho Safari/Trình duyệt trong Cài đặt của máy.",
+          type: 'error'
+        });
       }
       setIsListening(false);
     };
@@ -616,13 +631,21 @@ const App = () => {
       if (count > 0) {
         await batch.commit(); 
         setAiPrompt('');
-        alert(`🎉 AI đã tạo thành công lộ trình gồm ${count} bước! (Powered by ${successfulProvider})`);
+        setNotification({
+          show: true,
+          message: `AI đã tạo thành công lộ trình gồm ${count} bước! (Powered by ${successfulProvider})`,
+          type: 'plan'
+        });
       } else {
          throw new Error("AI trả về kết quả nhưng không đúng định dạng lịch.");
       }
     } catch (e) {
       console.error("AI Generation Error", e);
-      alert(`Lỗi: ${e.message}`);
+      setNotification({
+        show: true,
+        message: `Lỗi: ${e.message}`,
+        type: 'error'
+      });
     } finally {
       setIsGeneratingAI(false);
     }
@@ -713,16 +736,20 @@ const App = () => {
           </div>
         </div>
 
-        {/* NOTIFICATION MODAL */}
+        {/* NOTIFICATION MODAL CUSTOM (Thay thế alert) */}
         {notification.show && (
           <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center p-0 md:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
             <div className="bg-white dark:bg-slate-800 rounded-t-[2rem] md:rounded-[3rem] p-8 md:p-10 w-full max-w-sm shadow-2xl text-center border border-white/20 relative z-10 mobile-bottom-sheet md:scale-up-center pb-12 md:pb-10">
-              <div className={`w-24 h-24 mx-auto rounded-[2rem] flex items-center justify-center mb-8 shadow-inner ${notification.type === 'work' ? 'bg-violet-100 text-violet-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                {notification.type === 'work' ? <PartyPopper size={48} /> : <Coffee size={48} />}
+              <div className={`w-24 h-24 mx-auto rounded-[2rem] flex items-center justify-center mb-8 shadow-inner ${notification.type === 'work' ? 'bg-violet-100 text-violet-600' : notification.type === 'break' ? 'bg-emerald-100 text-emerald-600' : notification.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                {notification.type === 'work' ? <PartyPopper size={48} /> : notification.type === 'break' ? <Coffee size={48} /> : notification.type === 'error' ? <X size={48} /> : <Sparkles size={48} />}
               </div>
-              <h3 className="text-3xl font-black mb-3">Tuyệt vời!</h3>
+              <h3 className="text-3xl font-black mb-3">
+                {notification.type === 'work' || notification.type === 'plan' ? 'Tuyệt vời!' : notification.type === 'error' ? 'Ối, có lỗi!' : 'Nghỉ ngơi thôi!'}
+              </h3>
               <p className="text-slate-500 mb-10 font-medium">{notification.message}</p>
-              <button onClick={() => setNotification({ ...notification, show: false })} className={`w-full py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-sm text-white transition-all duration-200 ease-out active:scale-95 shadow-xl ${notification.type === 'work' ? 'bg-violet-600' : 'bg-emerald-600'}`}>Tiếp tục thôi</button>
+              <button onClick={() => setNotification({ ...notification, show: false })} className={`w-full py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-sm text-white transition-all duration-200 ease-out active:scale-95 shadow-xl ${notification.type === 'work' ? 'bg-violet-600' : notification.type === 'break' ? 'bg-emerald-600' : notification.type === 'error' ? 'bg-red-600' : 'bg-indigo-600'}`}>
+                {notification.type === 'error' ? 'Đóng' : 'Tiếp tục thôi'}
+              </button>
             </div>
           </div>
         )}
