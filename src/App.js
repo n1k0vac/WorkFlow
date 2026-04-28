@@ -202,14 +202,21 @@ const App = () => {
   };
 
   // --- TÍCH HỢP FIREBASE CLOUD MESSAGING (FCM) ---
-  useEffect(() => {
+useEffect(() => {
     if (!user || !messaging) return;
 
     const requestFCMToken = async () => {
       try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-          const token = await getToken(messaging, { vapidKey: 'BIRhwJhJ-VUpPPH2A0hUZEmZ5n7cIS1RIIxrAPVc7bbd7e50eoXg-WrvwPnbt4WUdaTm4WWHV6iWK2tdH_Z3sZ0' });
+          // Trỏ trực tiếp vào file sw.js bạn đã tạo trong thư mục public
+          const registration = await navigator.serviceWorker.register('/sw.js');
+          
+          const token = await getToken(messaging, { 
+            vapidKey: 'BIRhwJhJ-VUpPPH2A0hUZEmZ5n7cIS1RIIxrAPVc7bbd7e50eoXg-WrvwPnbt4WUdaTm4WWHV6iWK2tdH_Z3sZ0',
+            serviceWorkerRegistration: registration 
+          });
+
           if (token) {
             console.log("Đã lấy được FCM Token:", token);
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'fcm'), { 
@@ -219,14 +226,13 @@ const App = () => {
           }
         }
       } catch (error) {
-        console.error("Lỗi khi lấy FCM Token:", error);
+        console.warn("Lỗi khi lấy FCM Token:", error);
       }
     };
 
     requestFCMToken();
 
     const unsubscribeFCM = onMessage(messaging, (payload) => {
-      console.log('Nhận thông báo đẩy từ Cloud:', payload);
       if ("Notification" in window && Notification.permission === "granted") {
         new Notification(payload.notification.title, {
           body: payload.notification.body,
