@@ -11,15 +11,14 @@ root.render(
   </React.StrictMode>
 );
 
-// ĐOẠN CODE ĐĂNG KÝ SERVICE WORKER ĐỂ BẬT TÍNH NĂNG PWA
+// HỦY ĐĂNG KÝ SERVICE WORKER ĐỂ TRÁNH LỖI CACHE CỨNG (Phải ấn Ctrl+F5)
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(registration => {
-        console.log('ServiceWorker đăng ký thành công với scope: ', registration.scope);
-      })
-      .catch(err => {
-        console.log('ServiceWorker đăng ký thất bại: ', err);
-      });
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (let registration of registrations) {
+      registration.unregister();
+      console.log('Đã hủy đăng ký Service Worker cũ thành công.');
+    }
+  }).catch((err) => {
+    console.log('Lỗi khi hủy đăng ký Service Worker: ', err);
   });
 }
